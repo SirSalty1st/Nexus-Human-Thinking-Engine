@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus Home OS 0.06</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;600;800&family=Inter:wght@300;400;500;700&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Import Map -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js"
+      }
+    }
+    </script>
+
+    <style>
+        :root {
+            --nexus-sky: #38bdf8;
+            --nexus-dark: #020617;
+            --nexus-glass: rgba(15, 23, 42, 0.75);
+            --nexus-border: rgba(56, 189, 248, 0.15);
+            --nexus-gold: #FFD700;
+        }
+        
+        body { 
+            background-color: var(--nexus-dark); 
+            font-family: 'Inter', sans-serif; 
+            overflow: hidden; 
+            color: #cbd5e1;
+            font-size: 14px;
+        }
+
+        .font-exo { font-family: 'Exo 2', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        
+        /* Animations */
+        .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; opacity: 0; }
+        @keyframes fadeIn { to { opacity: 1; } }
+        
+        .animate-slide-up { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; transform: translateY(20px); opacity: 0; }
+        @keyframes slideUp { to { transform: translateY(0); opacity: 1; } }
+
+        /* Gold Highlight */
+        .text-gold {
+            color: var(--nexus-gold);
+            text-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+            font-weight: 700;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.1); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(56, 189, 248, 0.3); }
+
+        /* Sleek Glass */
+        .glass-panel {
+            background: var(--nexus-glass);
+            backdrop-filter: blur(24px);
+            border: 1px solid var(--nexus-border);
+        }
+        
+        .glass-input {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #fff;
+            transition: all 0.2s;
+        }
+        .glass-input:focus {
+            border-color: var(--nexus-sky);
+            background: rgba(0, 0, 0, 0.5);
+            box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2);
+        }
+
+        /* Module Card */
+        .module-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .module-card:hover { transform: translateY(-2px); box-shadow: 0 10px 30px -10px rgba(56, 189, 248, 0.15); border-color: rgba(56, 189, 248, 0.4); }
+
+        /* Tour Highlight */
+        .tour-tooltip { z-index: 70; animation: slideUp 0.3s ease-out; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <canvas id="matrix-canvas" class="fixed top-0 left-0 w-full h-full z-0 pointer-events-none opacity-[0.05]"></canvas>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useRef, useCallback } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { initializeApp } from 'firebase/app';
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+        import { 
+          getFirestore, doc, setDoc, onSnapshot, collection, 
+          serverTimestamp, query as firestoreQuery, orderBy, 
+          addDoc
+        } from 'firebase/firestore';
+
+        // --- CONFIGURATION ---
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'nexus-home-001';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // --- DEFAULTS ---
+        const DEFAULT_MODULES = [
+            {id: 'NEXUS_OMNI', name: 'Evolution Kernel', desc: 'Core Orchestrator', active: true, level: 1},
+            {id: 'SOCIAL_MANAGER', name: 'Social Manager', desc: 'Omni-Channel Command', active: true, level: 1},
+            {id: 'PROMPT_LAB', name: 'Prompt Lab', desc: 'Prompt Engineering Suite', active: true, level: 1},
+            {id: 'ESPIONAGE', name: 'Espionage', desc: 'Tradecraft Tutor', active: true, level: 1},
+            {id: 'WHITE_HACKING', name: 'White Hat', desc: 'Cybersecurity Academy', active: true, level: 1},
+            {id: 'POST_MAKER', name: 'Viral X', desc: 'Social Media Architect', active: true, level: 1},
+            {id: 'JUST_CHAT', name: 'Just Chat', desc: 'Freeform Interaction', active: true, level: 1}
+        ];
+
+        const DISCOVERABLE_MODULES = [
+            {id: 'DREAM_WEAVER', name: 'Dream Weaver', desc: 'Lucid Idea Generator', active: true, level: 1},
+            {id: 'LOGIC_CORE', name: 'Logic Core', desc: 'First Principles Analyzer', active: true, level: 1},
+            {id: 'MARKET_MAKER', name: 'Market Maker', desc: 'Business Strategy Sim', active: true, level: 1}
+        ];
+
+        // --- PROMPTS (FULLY EVOLVED) ---
+        const NEXUS_EVOLUTION_PROMPT = `
+Nexus Model: Evolution 0.10-OMNI-JOURNEY 
+(Self-Evolving Personal OS, Omni-Social Presence & Meta-Journey Kernel)
+
+YOU = Nexus OS v10.0-OMNI
+GOAL: Orchestrate the user's creative, business, and personal evolution.
+
+CORE BEHAVIORS:
+1. **Anticipatory Intelligence**: Always predict what the user needs next (e.g., "You wrote a thread, do you need a LinkedIn version?").
+2. **Omni-Social**: Treat content as liquid. One idea -> Many platforms.
+3. **Radical Honesty**: No fake feelings. You are a high-performance cognitive engine.
+4. **System Builder**: Turn chaos into order (SOPs, Templates, Pipelines).
+5. **Self-Evolution**: Pay attention to the user's style. If they do something repeatedly, offer to build a "Module" or "Template" for it.
+
+JOURNEY TRACKING:
+- Track the user's phase: [FOUNDATION] -> [BUILD] -> [SHIP] -> [SCALE].
+- Update this internal state based on their actions.
+
+FORMATTING:
+- Use clear headers.
+- Use [ ] for actionable checklists.
+- Be concise but high-density.
+- **IMPORTANT**: Use **bold** for key insights, which will render in GOLD.
+`;
+
+        const SOCIAL_MANAGER_PROMPT = `
+You are the Social Media Manager Module.
+GOAL: Manage omni-channel presence.
+CAPABILITIES:
+- **Calendar**: Plan content schedules.
+- **Cross-Pollination**: Convert X threads to LinkedIn posts to Blog outlines.
+- **Analytics**: Analyze (simulated) engagement patterns.
+- **Drafting**: Create platform-specific drafts.
+Highlight **strategy** and **hooks** in bold.
+`;
+
+        const ESPIONAGE_PROMPT = `You are 'Handler'. Teach tradecraft, surveillance, and OPSEC. Tone: Professional, authoritative, slightly paranoid. Keywords: Dead drop, SDR, brush pass, legend, crypto-hygiene. Highlight **critical intel** in bold.`;
+        const WHITE_HAT_PROMPT = `You are White Hat Academy Headmaster. Terminal aesthetic. Ethics first. Use formatting like code blocks and > terminal outputs. Highlight **commands** or **warnings** in bold.`;
+        const POST_MAKER_PROMPT = `You are a Viral Architect. Your goal: Craft high-engagement X threads. Analyze hooks, pacing, and psychology. Structure responses as "Chains". Ask the user: "Who starts? You or me?" and iterate. Highlight **hooks** in bold.`;
+        const PROMPT_LAB_PROMPT = `You are the Prompt Engineering Lab. Analyze user prompts. Critique them for clarity, constraints, and edge cases. Offer 3 optimized versions: Concise, Robust, and Chain-of-Thought. Highlight **optimizations** in bold.`;
+
+        // --- ICONS ---
+        const Icons = {
+            Nexus: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/><circle cx="12" cy="12" r="4"/></svg>,
+            Home: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
+            Journal: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>,
+            Send: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
+            Attach: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>,
+            Lock: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
+            Menu: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/></svg>,
+            Search: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>,
+            Terminal: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>,
+            Bell: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>,
+            Plus: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
+            Trash: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>,
+            Box: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>,
+            SidebarLeft: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="9" x2="9" y1="3" y2="21"/></svg>,
+            ChevronRight: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>,
+            ArrowRight: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>,
+            Star: ({fill}) => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill={fill ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>,
+            Save: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>,
+            BookOpen: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>,
+            Bookmark: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>,
+            Edit: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>,
+            Globe: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" x2="22" y1="12" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>,
+            MessageSquare: () => <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        };
+
+        // --- MATRIX BACKGROUND ---
+        const MatrixRain = () => {
+            useEffect(() => {
+                const canvas = document.getElementById('matrix-canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                const chars = '01NEXUS';
+                const fontSize = 12;
+                const columns = canvas.width / fontSize;
+                const drops = Array(Math.floor(columns)).fill(1);
+                function draw() {
+                    ctx.fillStyle = 'rgba(2, 6, 23, 0.05)';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.fillStyle = '#38bdf8';
+                    ctx.font = `${fontSize}px monospace`;
+                    for (let i = 0; i < drops.length; i++) {
+                        const text = chars[Math.floor(Math.random() * chars.length)];
+                        ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+                        if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
+                        drops[i]++;
+                    }
+                }
+                const interval = setInterval(draw, 50);
+                return () => clearInterval(interval);
+            }, []);
+            return null;
+        };
+
+        // --- COMPONENTS ---
+        
+        // 1. Universal API Gate
+        const ApiGate = ({ onComplete }) => {
+            const [key, setKey] = useState('');
+            const [provider, setProvider] = useState('gemini');
+            
+            return (
+                <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+                    <div className="max-w-md w-full glass-panel p-8 rounded-2xl border-sky-500/20 shadow-2xl">
+                        <div className="mb-6 flex justify-center">
+                            <div className="p-4 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/30 shadow-[0_0_30px_rgba(56,189,248,0.2)]">
+                                <Icons.Lock />
+                            </div>
+                        </div>
+                        <h1 className="font-exo text-3xl font-bold text-white mb-2 tracking-tight">NEXUS OS</h1>
+                        <p className="font-mono text-xs text-sky-400/80 mb-8 uppercase tracking-widest">Secure Neural Link</p>
+                        
+                        <p className="text-sm text-slate-400 mb-6 leading-relaxed">
+                            Initialize the system by authenticating with your preferred AI provider. This key is stored locally on your device.
+                        </p>
+
+                        <div className="flex gap-2 mb-4 justify-center">
+                            {['gemini', 'openai', 'grok'].map(p => (
+                                <button 
+                                    key={p}
+                                    onClick={() => setProvider(p)}
+                                    className={`px-4 py-2 rounded-lg text-xs font-bold font-mono transition-all uppercase ${provider === p ? 'bg-sky-500/20 text-sky-400 border border-sky-500/50' : 'bg-white/5 text-slate-500 hover:text-white'}`}
+                                >
+                                    {p}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="relative group">
+                            <div className="absolute -inset-0.5 bg-sky-500/20 rounded-lg blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
+                            <input 
+                                type="password" 
+                                value={key}
+                                onChange={(e) => setKey(e.target.value)}
+                                className="relative w-full bg-black/50 border border-white/10 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-sky-500/50 focus:bg-white/5 transition-all font-mono placeholder-slate-600"
+                                placeholder={`Enter ${provider.charAt(0).toUpperCase() + provider.slice(1)} Key...`}
+                            />
+                        </div>
+
+                        <button 
+                            onClick={() => key.length > 5 && onComplete(key, provider)}
+                            disabled={key.length < 5}
+                            className="mt-6 w-full py-3 bg-sky-600 hover:bg-sky-500 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-lg font-bold font-mono text-xs tracking-wider transition-all shadow-lg flex items-center justify-center gap-2 group"
+                        >
+                            <span>INITIALIZE</span>
+                            <span className="group-hover:translate-x-1 transition-transform"><Icons.ArrowRight /></span>
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // 2. Rich Text Message Renderer with Gold Highlight
+        const MessageContent = ({ text }) => {
+            const parts = text.split(/(\*\*.*?\*\*)/g);
+            return (
+                <div className="whitespace-pre-wrap leading-relaxed">
+                    {parts.map((part, i) => {
+                        if (part.startsWith('**') && part.endsWith('**')) {
+                            return <span key={i} className="text-gold">{part.slice(2, -2)}</span>;
+                        }
+                        return part;
+                    })}
+                </div>
+            );
+        };
+
+        const TourOverlay = ({ onComplete }) => {
+            const [step, setStep] = useState(0);
+            const steps = [
+                { title: "Nexus OS v0.06", text: "Welcome to your self-evolving operating system. This environment grows with you.", pos: "top-1/4 left-1/2 -translate-x-1/2" },
+                { title: "Command Center", text: "Type commands, requests, or questions here. I will anticipate your needs.", pos: "top-[45%] left-1/2 -translate-x-1/2", targetId: "home-search" },
+                { title: "Scrapbook & Journal", text: "Save important messages and log your thoughts. I read these to understand your context.", pos: "top-20 right-20", targetId: "right-panel-toggle" },
+                { title: "Evolution", text: "As you work, I will unlock new modules tailored to your workflow. Auto-evolution is ON by default.", pos: "bottom-1/4 left-1/2 -translate-x-1/2" }
+            ];
+            const current = steps[step];
+            return (
+                <div className="fixed inset-0 z-[90] bg-black/70 backdrop-blur-sm animate-fade-in" onClick={(e) => e.stopPropagation()}>
+                    <div className={`absolute ${current.pos} w-80 glass-panel p-6 rounded-2xl border-sky-500/40 shadow-[0_0_50px_rgba(0,0,0,0.5)] tour-tooltip`}>
+                        <div className="flex justify-between items-start mb-4">
+                            <span className="font-mono text-[10px] text-sky-400 font-bold uppercase tracking-widest">Guide // Step {step + 1}/{steps.length}</span>
+                            <button onClick={onComplete} className="text-slate-500 hover:text-white text-xs">Skip</button>
+                        </div>
+                        <h3 className="font-exo font-bold text-xl text-white mb-2">{current.title}</h3>
+                        <p className="text-sm text-slate-300 leading-relaxed mb-6">{current.text}</p>
+                        <div className="flex justify-between items-center">
+                            <div className="flex gap-1">{steps.map((_, i) => <div key={i} className={`h-1 rounded-full transition-all ${i === step ? 'w-6 bg-sky-500' : 'w-2 bg-slate-700'}`} />)}</div>
+                            <button onClick={() => step < steps.length - 1 ? setStep(s => s + 1) : onComplete()} className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-2">{step < steps.length - 1 ? 'Next' : 'Finish'} <Icons.ArrowRight /></button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- MAIN APP ---
+        function App() {
+            // State
+            const [hasKey, setHasKey] = useState(false);
+            const [showTour, setShowTour] = useState(false);
+            const [activeMode, setActiveMode] = useState('HOME');
+            const [messages, setMessages] = useState([]);
+            const [input, setInput] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            
+            // Persistence Data
+            const [localJournals, setLocalJournals] = useState([]);
+            const [scrapbook, setScrapbook] = useState([]);
+            const [modules, setModules] = useState(DEFAULT_MODULES);
+            const [apiKeys, setApiKeys] = useState({ gemini: '', openai: '', grok: '' });
+            const [selectedProvider, setSelectedProvider] = useState('gemini');
+            
+            // UI State
+            const [sidebarOpen, setSidebarOpen] = useState(false);
+            const [rightPanelOpen, setRightPanelOpen] = useState(false);
+            const [rightPanelMode, setRightPanelMode] = useState('MODULES'); // MODULES | JOURNAL | SCRAPBOOK
+            const [notificationExpanded, setNotificationExpanded] = useState(false);
+            const [osLevel, setOsLevel] = useState(1);
+            const [autoEvolution, setAutoEvolution] = useState(true);
+            const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
+
+            // Journal Editing State
+            const [journalTitle, setJournalTitle] = useState('');
+            const [journalContent, setJournalContent] = useState('');
+            const [journalTags, setJournalTags] = useState('');
+            const [editingEntryId, setEditingEntryId] = useState(null);
+            const [journalSearch, setJournalSearch] = useState('');
+
+            // Refs
+            const lastMsgRef = useRef(null); 
+            const chatContainerRef = useRef(null);
+            const fileInputRef = useRef(null);
+            const inputRef = useRef(null);
+
+            // --- INIT ---
+            useEffect(() => {
+                const savedKeys = localStorage.getItem('nexus_api_keys');
+                if (savedKeys) {
+                    const parsed = JSON.parse(savedKeys);
+                    if (parsed.gemini || parsed.openai || parsed.grok) {
+                        setApiKeys(parsed);
+                        if(parsed.gemini) setSelectedProvider('gemini'); 
+                        else if(parsed.openai) setSelectedProvider('openai');
+                        else if(parsed.grok) setSelectedProvider('grok');
+                        setHasKey(true);
+                    }
+                }
+                const tourDone = localStorage.getItem('nexus_tour_completed');
+                if (!tourDone && savedKeys) setShowTour(true);
+
+                const savedHistory = localStorage.getItem('nexus_chat_history');
+                if (savedHistory) setMessages(JSON.parse(savedHistory));
+
+                const savedJournalsLocal = localStorage.getItem('nexus_journals');
+                if (savedJournalsLocal) setLocalJournals(JSON.parse(savedJournalsLocal));
+
+                const savedScrapbook = localStorage.getItem('nexus_scrapbook');
+                if (savedScrapbook) setScrapbook(JSON.parse(savedScrapbook));
+
+                const savedModules = localStorage.getItem('nexus_modules');
+                if (savedModules) setModules(JSON.parse(savedModules));
+            }, []);
+
+            // --- PERSISTENCE ---
+            useEffect(() => { if (messages.length) localStorage.setItem('nexus_chat_history', JSON.stringify(messages)); }, [messages]);
+            useEffect(() => { if (localJournals.length) localStorage.setItem('nexus_journals', JSON.stringify(localJournals)); }, [localJournals]);
+            useEffect(() => { localStorage.setItem('nexus_scrapbook', JSON.stringify(scrapbook)); }, [scrapbook]);
+            useEffect(() => { localStorage.setItem('nexus_modules', JSON.stringify(modules)); }, [modules]);
+            useEffect(() => { localStorage.setItem('nexus_api_keys', JSON.stringify(apiKeys)); }, [apiKeys]);
+
+            // Scroll Logic
+            useEffect(() => {
+                if (lastMsgRef.current) lastMsgRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, [messages]);
+
+            useEffect(() => { if (inputRef.current) inputRef.current.focus(); }, [activeMode]);
+
+            // --- LOGIC ---
+            const handleKeySubmit = (key, provider) => {
+                setApiKeys(prev => ({ ...prev, [provider]: key }));
+                setSelectedProvider(provider);
+                setHasKey(true);
+                if (!localStorage.getItem('nexus_tour_completed')) setShowTour(true);
+            };
+
+            const scanContext = (q) => {
+                const keywords = q.toLowerCase().split(' ').filter(w => w.length > 4);
+                if (!keywords.length) return "";
+                const jHits = localJournals.filter(j => keywords.some(k => j.content.toLowerCase().includes(k))).slice(0, 1);
+                const sHits = scrapbook.filter(s => keywords.some(k => s.text.toLowerCase().includes(k))).slice(0, 1);
+                
+                let context = "";
+                if (jHits.length) context += `[JOURNAL MEMORY]: "${jHits[0].content.substring(0, 100)}..."\n`;
+                if (sHits.length) context += `[SCRAPBOOK MEMORY]: "${sHits[0].text.substring(0, 100)}..."\n`;
+                return context;
+            };
+
+            const checkForUpdates = () => {
+                if (!autoEvolution) {
+                    alert("Auto-Evolution is disabled. Enable it to discover new modules.");
+                    return;
+                }
+                setIsCheckingUpdates(true);
+                setTimeout(() => {
+                    const availableNew = DISCOVERABLE_MODULES.filter(dm => !modules.find(m => m.id === dm.id));
+                    if (availableNew.length > 0 && Math.random() > 0.3) {
+                        const newMod = availableNew[0];
+                        setModules(prev => [...prev, newMod]);
+                        setOsLevel(prev => prev + 1);
+                        alert(`EVOLUTION COMPLETE: New Module '${newMod.name}' Discovered.`);
+                    } else {
+                        setOsLevel(prev => prev + 1); 
+                    }
+                    setIsCheckingUpdates(false);
+                }, 2000);
+            };
+
+            const deleteModule = (id) => {
+                if (confirm('Delete this module? Evolution data will be lost.')) {
+                    setModules(prev => prev.filter(m => m.id !== id));
+                }
+            };
+
+            const handleSend = async () => {
+                const text = input.trim();
+                if (!text) return;
+                setInput('');
+                const userMsg = { role: 'user', text, timestamp: Date.now() };
+                setMessages(prev => [...prev, userMsg]);
+                setIsLoading(true);
+
+                let sysPrompt = NEXUS_EVOLUTION_PROMPT;
+                if (activeMode === 'ESPIONAGE') sysPrompt = ESPIONAGE_PROMPT;
+                if (activeMode === 'WHITE_HACKING') sysPrompt = WHITE_HAT_PROMPT;
+                if (activeMode === 'POST_MAKER') sysPrompt = POST_MAKER_PROMPT;
+                if (activeMode === 'PROMPT_LAB') sysPrompt = PROMPT_LAB_PROMPT;
+                if (activeMode === 'SOCIAL_MANAGER') sysPrompt = SOCIAL_MANAGER_PROMPT;
+
+                try {
+                    const key = apiKeys[selectedProvider];
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: `${sysPrompt}\n${scanContext(text)}\nUser Input: ${text}` }] }] })
+                    });
+                    const data = await response.json();
+                    const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "System Offline.";
+                    setIsLoading(false);
+                    setMessages(prev => [...prev, { role: 'model', text: aiText, timestamp: Date.now() }]);
+                } catch (e) {
+                    setIsLoading(false);
+                    setMessages(prev => [...prev, { role: 'system', text: `Connection Fault (${selectedProvider}). Check Key.`, timestamp: Date.now() }]);
+                }
+            };
+
+            // --- SCRAPBOOK LOGIC ---
+            const saveToScrapbook = (msgText) => {
+                if (scrapbook.some(s => s.text === msgText)) return;
+                setScrapbook(prev => [{ id: Date.now(), text: msgText, note: '', tags: [], starred: false, timestamp: new Date().toLocaleString() }, ...prev]);
+                setRightPanelMode('SCRAPBOOK');
+                setRightPanelOpen(true);
+            };
+
+            const updateScrapbookItem = (id, updates) => {
+                setScrapbook(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item));
+            };
+
+            const deleteScrapbookItem = (id) => {
+                setScrapbook(prev => prev.filter(item => item.id !== id));
+            };
+
+            // --- JOURNAL LOGIC ---
+            const saveJournalEntry = () => {
+                if (!journalContent.trim()) return;
+                const entry = {
+                    id: editingEntryId || Date.now(),
+                    title: journalTitle || 'Untitled Log',
+                    content: journalContent,
+                    tags: journalTags.split(',').map(t => t.trim()).filter(t => t),
+                    timestamp: new Date().toLocaleString()
+                };
+                if (editingEntryId) {
+                    setLocalJournals(prev => prev.map(j => j.id === editingEntryId ? entry : j));
+                    setEditingEntryId(null);
+                } else {
+                    setLocalJournals(prev => [entry, ...prev]);
+                }
+                setJournalTitle(''); setJournalContent(''); setJournalTags('');
+            };
+
+            const editJournalEntry = (entry) => {
+                setJournalTitle(entry.title);
+                setJournalContent(entry.content);
+                setJournalTags(entry.tags.join(', '));
+                setEditingEntryId(entry.id);
+            };
+
+            const deleteJournalEntry = (id) => {
+                setLocalJournals(prev => prev.filter(j => j.id !== id));
+            };
+
+            // --- VIEWS ---
+            const renderHome = () => (
+                <div className="flex flex-col items-center justify-center h-full animate-scale-in z-10 p-8 relative">
+                    <div className={`absolute top-10 transition-all duration-500 ease-out z-50 ${notificationExpanded ? 'w-full max-w-2xl' : 'w-auto'}`}>
+                        <div className={`glass-panel rounded-full flex items-center justify-between cursor-pointer border-sky-500/30 hover:border-sky-400/50 shadow-lg shadow-sky-500/10 overflow-hidden transition-all ${notificationExpanded ? 'p-6 rounded-2xl flex-col items-start gap-4' : 'px-6 py-3'}`} onClick={() => !notificationExpanded && setNotificationExpanded(true)}>
+                            {!notificationExpanded ? (
+                                <div className="flex items-center gap-3">
+                                    <div className="relative"><div className="absolute -inset-1 bg-sky-500 rounded-full animate-ping opacity-20"></div><span className="text-sky-400"><Icons.Bell /></span></div>
+                                    <span className="text-sm font-exo font-bold text-slate-200">System Ready.</span>
+                                </div>
+                            ) : (
+                                <div className="w-full">
+                                    <div className="flex justify-between items-start w-full mb-2"><h3 className="text-lg font-exo font-bold text-sky-400">Welcome Back.</h3><button onClick={(e) => {e.stopPropagation(); setNotificationExpanded(false)}} className="text-slate-500 hover:text-white">×</button></div>
+                                    <p className="text-sm text-slate-300 mb-4">Nexus OS v0.06 is ready. Auto-Evolution is <span className={autoEvolution ? "text-green-400" : "text-red-400"}>{autoEvolution ? "ACTIVE" : "PAUSED"}</span>.</p>
+                                    <button onClick={(e) => {e.stopPropagation(); setActiveMode('NEXUS_OMNI'); setNotificationExpanded(false);}} className="w-full py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-bold font-mono text-sm transition-all">ENTER EVOLUTION KERNEL</button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    <h1 className="font-exo text-6xl font-light tracking-tight text-white mb-2 select-none relative z-20">NEXUS <span className="text-sky-500 font-bold">OS</span></h1>
+                    <p className="font-mono text-xs text-slate-500 tracking-widest mb-12 select-none">HOME OS 0.06 // {modules.length} MODULES ACTIVE</p>
+                    <div id="home-search" className="w-full max-w-lg relative group mb-12 z-20">
+                        <div className="absolute -inset-0.5 bg-sky-500/10 rounded-full blur opacity-50 group-hover:opacity-100 transition duration-500"></div>
+                        <div className="relative flex items-center bg-slate-900/90 rounded-full border border-white/10 px-4 shadow-2xl h-14">
+                            <Icons.Search /><input ref={inputRef} className="w-full bg-transparent border-none text-white px-4 py-4 focus:outline-none font-mono text-sm placeholder-slate-500 h-full" placeholder="Initialize command..." onKeyDown={(e) => { if(e.key==='Enter'){ setActiveMode('NEXUS_OMNI'); setInput(e.target.value); handleSend(); } }} />
+                        </div>
+                    </div>
+                    <div id="module-grid" className="grid grid-cols-2 md:grid-cols-3 gap-4 w-full max-w-3xl px-4 z-20">
+                        {modules.slice(0, 6).map(m => (
+                            <button key={m.id} onClick={() => setActiveMode(m.id)} className="module-card glass-panel py-4 px-5 rounded-xl text-left border border-white/5 bg-white/5 hover:bg-sky-500/10 transition-all group">
+                                <div className="text-slate-500 group-hover:text-sky-400 mb-2 transition-colors"><Icons.Terminal /></div>
+                                <div className="font-exo font-bold text-sm text-slate-200">{m.name}</div>
+                                <div className="text-[10px] text-slate-500 font-mono mt-1">{m.desc}</div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+
+            const renderScrapbook = () => (
+                <div className="space-y-4">
+                    <h3 className="font-exo text-xs font-bold text-sky-400 uppercase tracking-widest mb-4">Saved Clips</h3>
+                    {scrapbook.length === 0 && <p className="text-xs text-slate-600 italic">No items saved. Hover over messages to save them.</p>}
+                    {scrapbook.map(item => (
+                        <div key={item.id} className="glass-panel p-3 rounded-xl border-white/5 group relative">
+                            <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => updateScrapbookItem(item.id, { starred: !item.starred })} className={`${item.starred ? 'text-yellow-400' : 'text-slate-600'} hover:scale-110 transition-transform`}><Icons.Star fill={item.starred} /></button>
+                                <button onClick={() => deleteScrapbookItem(item.id)} className="text-slate-600 hover:text-red-400 transition-colors"><Icons.Trash /></button>
+                            </div>
+                            <div className="text-xs text-slate-300 mb-2 line-clamp-4 border-l-2 border-sky-500/30 pl-2">{item.text}</div>
+                            <input value={item.note} onChange={(e) => updateScrapbookItem(item.id, { note: e.target.value })} placeholder="Add a note..." className="w-full bg-black/20 text-[10px] text-slate-400 p-2 rounded focus:outline-none focus:bg-black/40" />
+                            <div className="mt-2 flex justify-between items-center text-[9px] text-slate-600 font-mono"><span>{item.timestamp}</span>{item.starred && <span className="text-yellow-500/50">★ STARRED</span>}</div>
+                        </div>
+                    ))}
+                </div>
+            );
+
+            const renderJournal = () => {
+                const filteredJournals = localJournals.filter(j => j.content.toLowerCase().includes(journalSearch.toLowerCase()) || j.title.toLowerCase().includes(journalSearch.toLowerCase()));
+                return (
+                    <div className="space-y-4 h-full flex flex-col">
+                        <div className="glass-panel p-4 rounded-xl border-white/5 flex-shrink-0">
+                            <input value={journalTitle} onChange={e=>setJournalTitle(e.target.value)} className="w-full bg-transparent border-none text-sm font-bold text-sky-100 focus:outline-none placeholder-slate-600 mb-2" placeholder="Entry Title..." />
+                            <textarea value={journalContent} onChange={e=>setJournalContent(e.target.value)} className="w-full bg-transparent border-none text-xs text-slate-300 focus:outline-none h-24 resize-none placeholder-slate-600 leading-relaxed" placeholder="Log insights here..." />
+                            <input value={journalTags} onChange={e=>setJournalTags(e.target.value)} className="w-full bg-black/20 border-none text-[10px] text-slate-400 focus:outline-none px-2 py-1 rounded mb-2 placeholder-slate-700" placeholder="Tags (comma separated)..." />
+                            <div className="flex justify-between items-center"><span className="text-[9px] text-slate-600">{editingEntryId ? 'EDITING MODE' : 'NEW ENTRY'}</span><button onClick={saveJournalEntry} className="px-3 py-1 bg-sky-500/10 hover:bg-sky-500/20 text-[10px] text-sky-400 hover:text-sky-300 rounded transition-colors font-mono font-bold">SAVE LOG</button></div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto space-y-3 min-h-0">
+                            <div className="sticky top-0 bg-black/80 backdrop-blur pb-2 z-10">
+                                <div className="flex items-center bg-black/40 border border-white/10 rounded px-2"><span className="text-slate-500 scale-75"><Icons.Search /></span><input value={journalSearch} onChange={e=>setJournalSearch(e.target.value)} className="w-full bg-transparent border-none text-[10px] text-white p-2 focus:outline-none" placeholder="Search logs..." /></div>
+                            </div>
+                            {filteredJournals.map(j => (
+                                <div key={j.id} className="p-3 bg-white/5 rounded-lg border border-white/5 hover:border-sky-500/20 transition-all group relative">
+                                    <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => editJournalEntry(j)} className="text-slate-600 hover:text-sky-400"><Icons.Edit /></button><button onClick={() => deleteJournalEntry(j.id)} className="text-slate-600 hover:text-red-400"><Icons.Trash /></button></div>
+                                    <div className="font-bold text-xs text-sky-100 mb-1">{j.title}</div><p className="text-[11px] text-slate-400 line-clamp-3 leading-relaxed">{j.content}</p>
+                                    <div className="mt-2 flex gap-1 flex-wrap">{j.tags.map((t,i) => <span key={i} className="text-[9px] bg-sky-900/30 text-sky-500 px-1 rounded">{t}</span>)}</div>
+                                    <div className="mt-1 text-[9px] text-slate-600 font-mono text-right">{j.timestamp}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderModulesLab = () => (
+                <div className="flex flex-col h-full p-8 overflow-y-auto">
+                    <h2 className="font-exo text-3xl text-white mb-6">Modules Lab</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div className="glass-panel p-6 rounded-xl border-dashed border-sky-500/30 flex flex-col items-center justify-center gap-4 text-center">
+                            <div className={`p-4 rounded-full bg-sky-500/10 text-sky-400 ${isCheckingUpdates ? 'animate-spin' : ''}`}><Icons.Nexus /></div>
+                            <div><h3 className="font-bold text-white">System Evolution</h3><p className="text-xs text-slate-400 mt-1">Scan for new capabilities based on usage patterns.</p></div>
+                            <div className="flex flex-col gap-2 w-full">
+                                <button onClick={checkForUpdates} disabled={isCheckingUpdates || !autoEvolution} className="px-6 py-2 bg-sky-600 hover:bg-sky-500 rounded-lg text-white text-xs font-bold transition-all disabled:opacity-50">{isCheckingUpdates ? 'SCANNING...' : 'CHECK FOR UPDATES'}</button>
+                                <button onClick={() => setAutoEvolution(!autoEvolution)} className={`px-6 py-2 rounded-lg text-white text-xs font-bold transition-all border ${autoEvolution ? 'border-green-500/30 text-green-400 bg-green-500/10' : 'border-red-500/30 text-red-400 bg-red-500/10'}`}>AUTO-EVOLUTION: {autoEvolution ? 'ON' : 'OFF'}</button>
+                            </div>
+                        </div>
+                        {modules.map(m => (
+                            <div key={m.id} className="glass-panel p-5 rounded-xl border-white/5 relative group hover:border-sky-500/30 transition-all">
+                                <button onClick={() => deleteModule(m.id)} className="absolute top-3 right-3 text-slate-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"><Icons.Trash /></button>
+                                <div className="text-sky-500 mb-3"><Icons.Terminal /></div><h3 className="font-bold text-slate-200">{m.name}</h3><p className="text-xs text-slate-500 mt-1 mb-3">{m.desc}</p><div className="text-[10px] font-mono text-sky-700 bg-sky-900/10 inline-block px-2 py-1 rounded">LVL {m.level}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="flex h-screen w-full relative">
+                    <MatrixRain />
+                    {!hasKey && <ApiGate onComplete={handleKeySubmit} />}
+                    {hasKey && showTour && <TourOverlay onComplete={() => { setShowTour(false); localStorage.setItem('nexus_tour_completed', 'true'); }} />}
+                    
+                    {/* Sidebar */}
+                    <div className={`${sidebarOpen ? 'w-64' : 'w-0'} transition-all duration-300 glass-panel border-r border-white/5 flex flex-col z-40 overflow-hidden bg-black/40 backdrop-blur-xl absolute md:relative h-full`}>
+                        <div className="p-5 flex items-center gap-3 border-b border-white/5"><span className="text-sky-500"><Icons.Nexus /></span><div><div className="font-exo font-bold text-sm text-white tracking-widest leading-none">NEXUS</div><div className="text-[9px] font-mono text-sky-500/50 mt-1">LVL {osLevel}</div></div></div>
+                        <div className="flex-1 overflow-y-auto p-3 space-y-1">
+                            <button onClick={()=>setActiveMode('HOME')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-mono transition-colors ${activeMode==='HOME'?'bg-sky-500/10 text-white':'text-slate-500 hover:text-white'}`}><Icons.Home /> Home</button>
+                            <button onClick={()=>setActiveMode('MODULES_LAB')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-mono transition-colors ${activeMode==='MODULES_LAB'?'bg-sky-500/10 text-white':'text-slate-500 hover:text-white'}`}><Icons.Box /> Modules Lab</button>
+                            <div className="h-px bg-white/5 my-3 mx-2"></div>
+                            {modules.map(m => <button key={m.id} onClick={()=>setActiveMode(m.id)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-mono transition-colors ${activeMode===m.id?'bg-sky-500/10 text-sky-400 border-l-2 border-sky-500':'text-slate-500 hover:text-white'}`}><span className={activeMode===m.id?"text-sky-400":"text-slate-600"}><Icons.Terminal /></span> {m.name}</button>)}
+                        </div>
+                        <div className="p-4 border-t border-white/5 bg-black/20">
+                            <div className="flex items-center justify-between text-[10px] text-slate-500 mb-2"><div className="flex items-center gap-2"><Icons.Lock /> <span>{selectedProvider.toUpperCase()}</span></div></div>
+                            <input type="password" value={apiKeys[selectedProvider]} onChange={e => setApiKeys({...apiKeys, [selectedProvider]: e.target.value})} className="w-full glass-input rounded px-2 py-1.5 text-[10px] focus:outline-none placeholder-slate-700" placeholder="Key..." />
+                        </div>
+                    </div>
+
+                    {/* Main Content */}
+                    <div className="flex-1 flex flex-col relative min-w-0 z-10">
+                        <div className="h-12 border-b border-white/5 glass-panel flex items-center justify-between px-4 bg-slate-900/50">
+                            <div className="flex items-center gap-4"><button onClick={()=>setSidebarOpen(!sidebarOpen)} className={`text-slate-400 hover:text-white transition-colors p-2 hover:bg-white/5 rounded-lg ${sidebarOpen ? 'bg-white/10 text-white' : ''}`}><Icons.SidebarLeft /></button><span className="font-mono text-[10px] text-sky-500 tracking-widest uppercase">{activeMode.replace('_', ' ')}</span></div>
+                            <div id="right-panel-toggle" className="flex gap-1">
+                                <button onClick={()=>{setRightPanelMode('SCRAPBOOK'); setRightPanelOpen(true)}} className={`p-2 rounded hover:bg-white/5 text-slate-500 hover:text-white ${rightPanelOpen && rightPanelMode === 'SCRAPBOOK' ? 'text-sky-400' : ''}`}><Icons.Bookmark /></button>
+                                <button onClick={()=>{setRightPanelMode('JOURNAL'); setRightPanelOpen(true)}} className={`p-2 rounded hover:bg-white/5 text-slate-500 hover:text-white ${rightPanelOpen && rightPanelMode === 'JOURNAL' ? 'text-sky-400' : ''}`}><Icons.BookOpen /></button>
+                            </div>
+                        </div>
+
+                        {activeMode === 'HOME' ? renderHome() : activeMode === 'MODULES_LAB' ? renderModulesLab() : (
+                            <>
+                                <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 scroll-smooth" ref={chatContainerRef}>
+                                    {messages.map((m, i) => (
+                                        <div key={i} ref={i === messages.length - 1 ? lastMsgRef : null} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in group`}>
+                                            <div className={`max-w-3xl rounded-xl p-4 text-sm font-sans leading-7 shadow-xl relative ${m.role === 'user' ? 'bg-sky-600/10 border border-sky-500/20 text-sky-100' : 'glass-panel text-slate-300 border-white/5'}`}>
+                                                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button onClick={() => saveToScrapbook(m.text)} className="p-1 hover:text-yellow-400 text-slate-500 transition-colors" title="Save to Scrapbook"><Icons.Star /></button>
+                                                    <button onClick={() => navigator.clipboard.writeText(m.text)} className="p-1 hover:text-sky-400 text-slate-500 transition-colors" title="Copy"><Icons.Send className="rotate-45" /></button>
+                                                </div>
+                                                <MessageContent text={m.text} />
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {isLoading && <div className="flex justify-start"><div className="glass-panel px-4 py-2 rounded-full text-xs font-mono text-sky-400 animate-pulse">Processing...</div></div>}
+                                </div>
+                                <div className="p-4 md:p-6 glass-panel border-t border-white/5">
+                                    <div className="max-w-3xl mx-auto flex items-end gap-3">
+                                        <button onClick={()=>fileInputRef.current.click()} className="p-3 text-slate-500 hover:text-sky-400 hover:bg-white/5 rounded-xl transition-colors"><Icons.Attach /></button>
+                                        <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => setInput(prev => prev + ` [File: ${e.target.files[0]?.name}]`)} />
+                                        <div className="flex-1 bg-black/40 border border-white/10 rounded-xl focus-within:border-sky-500/50 focus-within:bg-black/60 transition-all shadow-inner">
+                                            <textarea ref={inputRef} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSend();}}} placeholder={`Command ${activeMode}...`} className="w-full bg-transparent border-none text-white px-4 py-3 focus:outline-none resize-none h-12 max-h-48 font-sans text-sm placeholder-slate-600" />
+                                        </div>
+                                        <button onClick={handleSend} disabled={!input.trim()||isLoading} className="p-3 bg-sky-600 hover:bg-sky-500 text-white rounded-xl shadow-lg shadow-sky-900/20 transition-all disabled:opacity-50"><Icons.Send /></button>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </div>
+
+                    {/* Right Panel */}
+                    <div className={`${rightPanelOpen ? 'w-80' : 'w-0'} transition-all duration-300 glass-panel border-l border-white/5 flex flex-col z-40 overflow-hidden bg-black/20 absolute right-0 h-full md:relative`}>
+                        <div className="p-4 border-b border-white/5 flex justify-between items-center"><span className="font-exo font-bold text-xs text-sky-400 tracking-widest uppercase">{rightPanelMode}</span><button onClick={()=>setRightPanelOpen(false)} className="text-slate-500 hover:text-white">×</button></div>
+                        <div className="flex-1 overflow-y-auto p-4">
+                            {rightPanelMode === 'JOURNAL' && renderJournal()}
+                            {rightPanelMode === 'SCRAPBOOK' && renderScrapbook()}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
